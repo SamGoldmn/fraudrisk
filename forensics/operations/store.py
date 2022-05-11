@@ -32,20 +32,23 @@ class TrainingData:
 class EllipticDataStore:
     training_data: TrainingData
 
-    def __init__(self, **kwargs):
+    def __init__(self, force_rebuild=False, **kwargs):
         if len(kwargs) < 2:
             kwargs = _fSTORE
         working_dir = os.getcwd()
         features_store = os.path.join(working_dir, kwargs["features"])
         labels_store = os.path.join(working_dir, kwargs["labels"])
-        if os.path.exists(features_store):
+        if os.path.exists(features_store) and force_rebuild == False:
             features_df = pd.read_csv(features_store)
             labels_df = pd.read_csv(labels_store)
             self.training_data = TrainingData(features_df, labels_df)
         else:
             processor = EllipticDataProcessor()
-            data = processor.get_full_dataset()
+            logging.info("Request dataset with force_rebuild=%s" % force_rebuild)
+            data = processor.get_full_dataset(force_rebuild)
+            logging.info("Store processed features: " + os.path.abspath(features_store))
             data.features.to_csv(features_store)
+            logging.info("Store processed labels: " + os.path.abspath(features_store))
             data.labels.to_csv(labels_store)
             self.training_data = data
 
@@ -74,13 +77,14 @@ class EllipticDataProcessor:
 
     def preprocess_training_data(self) -> TrainingData:
         data_lake: DataLake
-
+        logging.debug("Start preprocessing elliptic data")
         # Read raw data files
         data_lake = self._retrieve_data(self.features_file, self.labels_file)
         features_df = data_lake.features
         labels_df = data_lake.labels
 
         # Construct column names for features data
+        logging.debug("Construct column headers")
         columns = [_cID, _cTIME]
         for i in range(1, len(features_df.columns) - 1):
             columns.append(f"feature_{i}")
@@ -88,25 +92,29 @@ class EllipticDataProcessor:
 
         # Rename labels ["licit": 2, "illicit": 1, "unlabeled": "unknown"]
         # to            ["licit": 0, "illicit": 1, "unlabeled": -1 ]
+        logging.debug("Change label names")
         labels_df = labels_df.replace(
             {_cRESULT: {"unknown": -1, "1": 1, "2": 0}}
         ).astype({_cRESULT: int}, errors="raise")
         labels_df.loc[labels_df[_cRESULT] == 2, _cRESULT] = 0
 
         # Align features and labels, drop unlabeled
+        logging.debug("Align features and labels")
         combined_df = pd.merge(features_df, labels_df, on=_cID, how="left")
         combined_df = combined_df[combined_df[_cRESULT] != -1]
 
-        features_df = combined_df.drop(_cRESULT)
-        features_df = combined_df.drop(_cID)
+        features_df = combined_df.drop(columns=[_cRESULT])
+        features_df = combined_df.drop(columns=[_cID])
         labels_df = combined_df[_cRESULT]
 
         # Basic data engineering: Normalise feature data
+        logging.debug("Normalise feature data")
         coltime = features_df[_cTIME]
         std_scaler = StandardScaler()
         features_df = pd.DataFrame(std_scaler.fit_transform(features_df))
         features_df[_cTIME] = coltime
 
+        logging.debug("Done preprocessing data")
         return TrainingData(features_df, labels_df)
 
     def get_full_dataset(self, force_rebuild=False) -> TrainingData:
