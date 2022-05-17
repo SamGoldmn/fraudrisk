@@ -10,8 +10,9 @@ logging.basicConfig(
     level=logging.DEBUG, format="%(asctime)s | %(name)s | %(levelname)s | %(message)s"
 )
 
+force_rebuild = True
 
-store = EllipticDataStore(force_rebuild=True)
+store = EllipticDataStore(force_rebuild=force_rebuild)
 elliptic_data = store.get_data()
 logging.info("Head of features")
 elliptic_data.features.head()
